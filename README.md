@@ -9,7 +9,6 @@
 
 
 
-🚀 Recruiter-Ready Project Description
 
 This project showcases advanced Python development skills through two interactive games combining computer vision, real-time systems, and GUI design.
 
@@ -37,6 +36,8 @@ Smooth paddle control using interpolation
 Physics-based ball movement
 Multiplayer via dual-hand tracking
 Live webcam overlay
+
+
 🔤 Guess the Word Game
 
 📄 File: pythongame.py
@@ -49,12 +50,16 @@ Input validation & feedback system
 Lives-based gameplay
 Event-driven architecture
 ⚙️ Installation
+```
 git clone https://github.com/S-Harshni/Python-Games.git
 cd Python-Games
 pip install pygame opencv-python mediapipe
+```
 ▶️ Run
+```
 python pong_cv.py
 python pythongame.py
+```
 💡 Skills Demonstrated
 Python Development
 Computer Vision (MediaPipe, OpenCV)
