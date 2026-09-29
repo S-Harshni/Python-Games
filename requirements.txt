@@ -1,0 +1,5 @@
+pygame>=2.5
+opencv-python>=4.8
+# 0.10.21 is the last line with the legacy mp.solutions.hands API used for hand tracking
+# (Python 3.9-3.12). Without it the game still runs with keyboard controls.
+mediapipe==0.10.21

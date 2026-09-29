@@ -5,6 +5,15 @@ import mediapipe as mp
 import sys
 import random
 import math
+import argparse
+
+# --demo: no webcam needed, both paddles follow the ball (AI vs AI).
+# --screenshot PATH: render --frames frames, save the screen to PATH and exit.
+parser = argparse.ArgumentParser(description="Hand-controlled Pong (MediaPipe) with keyboard fallback")
+parser.add_argument("--demo", action="store_true", help="AI vs AI, no webcam")
+parser.add_argument("--screenshot", metavar="PATH", help="save a frame to PATH and exit")
+parser.add_argument("--frames", type=int, default=90, help="frames to simulate before --screenshot")
+args = parser.parse_args()
 
 
 pygame.init()
@@ -50,17 +59,32 @@ font_small = pygame.font.SysFont("Courier", 22)
 #    min_detection_confidence = how sure it needs to be before
 #    saying "yes there's a hand here"
 
-mp_hands = mp.solutions.hands
-hands_detector = mp_hands.Hands(
-    max_num_hands=2,
-    min_detection_confidence=0.7,
-    min_tracking_confidence=0.7
-)
+try:
+    mp_hands = mp.solutions.hands
+    hands_detector = mp_hands.Hands(
+        max_num_hands=2,
+        min_detection_confidence=0.7,
+        min_tracking_confidence=0.7
+    )
+except AttributeError:
+    # Newer MediaPipe builds dropped the legacy "solutions" API: play with the keyboard.
+    hands_detector = None
 
 
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH,  WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+cap = None if args.demo else cv2.VideoCapture(0)
+if cap is not None:
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+camera_ok = cap is not None and cap.isOpened()
+
+KEY_SPEED = 14   # paddle speed when using the keyboard (W/S and Up/Down)
+
+
+def quit_game():
+    if cap is not None:
+        cap.release()
+    pygame.quit()
+    sys.exit()
 
 
 p1 = pygame.Rect(40,              HEIGHT // 2 - PADDLE_H // 2, PADDLE_W, PADDLE_H)
@@ -129,7 +153,7 @@ def draw_dashed_line(surface, color, x, y1, y2, dash=14, gap=10):
 
 
 def draw_no_hand_indicator(surface, side, active):
-    
+    """Green dot when a hand controls the paddle; otherwise show the keyboard keys."""
     if side == "left":
         x = 80
         color = RED
@@ -141,7 +165,9 @@ def draw_no_hand_indicator(surface, side, active):
 
     dot_color = GREEN if active else GRAY
     pygame.draw.circle(surface, dot_color, (x, 30), 10)
-    txt = font_small.render(f"{label} {'✓' if active else 'NO HAND'}", True, dot_color)
+    keys = "W/S" if side == "left" else "UP/DOWN"
+    status = "HAND" if active else ("AI" if args.demo else f"KEYS {keys}")
+    txt = font_small.render(f"{label} {status}", True, dot_color)
     surface.blit(txt, (x - txt.get_width() // 2, 45))
 
 
@@ -161,33 +187,30 @@ launch_ball()
 while True:
 
       
-    ret, frame = cap.read()
-    if not ret:
-        continue  
+    # A webcam frame is optional: without one (or with --demo) the game keeps running
+    # on keyboard/AI control instead of freezing in a busy loop.
+    frame_rgb = None
+    if camera_ok:
+        ret, frame = cap.read()
+        if ret:
+            frame = cv2.resize(cv2.flip(frame, 1), (WIDTH, HEIGHT))
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_h, frame_w = HEIGHT, WIDTH
 
-    frame = cv2.flip(frame, 1)
-    frame_h, frame_w = frame.shape[:2]
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    
-    results = hands_detector.process(frame_rgb)
-    p1_hand, p2_hand = assign_hands(results, frame_w)
+    p1_hand = p2_hand = None
+    if frame_rgb is not None and hands_detector is not None:
+        results = hands_detector.process(frame_rgb)
+        p1_hand, p2_hand = assign_hands(results, frame_w)
 
    
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            cap.release()
-            pygame.quit()
-            sys.exit()
+            quit_game()
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                cap.release()
-                pygame.quit()
-                sys.exit()
+                quit_game()
             if event.key == pygame.K_q:   
-                cap.release()
-                pygame.quit()
-                sys.exit()
+                quit_game()
 
 
             if event.key == pygame.K_r and state == "win":
@@ -203,6 +226,19 @@ while True:
     if p2_hand:
         hand_y = get_hand_y(p2_hand, frame_h)
         p2_target_y = hand_y - PADDLE_H // 2
+
+    # Keyboard fallback when no hand is detected; AI control in --demo.
+    keys = pygame.key.get_pressed()
+    if args.demo:
+        p1_target_y = ball.centery - PADDLE_H // 2 + random.randint(-25, 25)
+        p2_target_y = ball.centery - PADDLE_H // 2 + random.randint(-25, 25)
+    else:
+        if not p1_hand:
+            p1_target_y += (keys[pygame.K_s] - keys[pygame.K_w]) * KEY_SPEED
+        if not p2_hand:
+            p2_target_y += (keys[pygame.K_DOWN] - keys[pygame.K_UP]) * KEY_SPEED
+    p1_target_y = max(0, min(HEIGHT - PADDLE_H, p1_target_y))
+    p2_target_y = max(0, min(HEIGHT - PADDLE_H, p2_target_y))
 
     # Smooth movement via lerp
     p1.y = int(lerp(p1.y, p1_target_y, LERP_SPEED))
@@ -265,10 +301,13 @@ while True:
                 launch_ball()
 
     
-    frame_surface = pygame.surfarray.make_surface(
-        cv2.transpose(frame_rgb)
-    )
-    screen.blit(frame_surface, (0, 0))
+    if frame_rgb is not None:
+        frame_surface = pygame.surfarray.make_surface(
+            cv2.transpose(frame_rgb)
+        )
+        screen.blit(frame_surface, (0, 0))
+    else:
+        screen.fill((14, 16, 28))
 
     
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -323,3 +362,9 @@ while True:
 
     pygame.display.flip()
     clock.tick(FPS)
+
+    if args.screenshot:
+        frame_count = globals().get("frame_count", 0) + 1
+        if frame_count >= args.frames:
+            pygame.image.save(screen, args.screenshot)
+            quit_game()
